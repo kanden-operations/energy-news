@@ -1,0 +1,20 @@
+{
+  "name": "kintone-summary",
+  "version": "1.0.0",
+  "description": "kintone daily/monthly summary image generator",
+  "type": "module",
+  "main": "run.js",
+  "scripts": {
+    "start": "node run.js",
+    "test-fetch": "node test-fetch.js",
+    "test-aggregate": "node test-aggregate.js",
+    "test-render": "node test-render.js",
+    "test-capture": "node test-capture.js"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "puppeteer": "^23.0.0"
+  }
+}
