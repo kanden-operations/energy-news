@@ -33,18 +33,30 @@ export function percentInt(waitCount, baseCount) {
   return Math.round((w / b) * 100);
 }
 
+
 // JST 時刻 (Node.js 側で利用)
+// サーバのタイムゾーン(GitHub Actions=UTC)に依存せず JST 基準で日付を返す
 export function nowJST() {
-  return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }));
+  return new Date();
 }
 
 export function toJSTDateString(date) {
-  const jst = new Date(date.toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }));
-  const y = jst.getFullYear();
-  const m = String(jst.getMonth() + 1).padStart(2, '0');
-  const d = String(jst.getDate()).padStart(2, '0');
+  // Intl.DateTimeFormat で直接 JST の "YYYY-MM-DD" を組み立てる
+  // (元JSの toLocaleString 二重変換はブラウザJST前提で、Node/UTCサーバでは1日ずれる)
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Tokyo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(date);
+  const y = parts.find(p => p.type === 'year').value;
+  const m = parts.find(p => p.type === 'month').value;
+  const d = parts.find(p => p.type === 'day').value;
   return `${y}-${m}-${d}`;
 }
+
+
+
 
 // kintone のクエリ値エスケープ
 export function escapeQueryValue(v) {
