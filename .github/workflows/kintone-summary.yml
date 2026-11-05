@@ -1,7 +1,13 @@
 name: kintone daily summary
 
 on:
-  workflow_dispatch: {} # 手動実行も可能に
+  workflow_dispatch: # 手動実行も可能に（GAS からの API 起動は入力なし＝今日の分）
+    inputs:
+      date:
+        description: '作り直す日付（YYYY-MM-DD）。空欄なら今日（日本時間）'
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: write # commit/push するため
@@ -35,12 +41,60 @@ jobs:
           KINTONE_TOKEN_A: ${{ secrets.KINTONE_TOKEN_A }}
           KINTONE_TOKEN_B: ${{ secrets.KINTONE_TOKEN_B }}
           KINTONE_TOKEN_C: ${{ secrets.KINTONE_TOKEN_C }}
-        run: node run.js
+          SUMMARY_DATE: ${{ inputs.date }}
+        run: |
+          # 日付が指定されていれば、形と実在を確かめてから run.js に --date で渡す（空欄なら今日）
+          if [ -n "$SUMMARY_DATE" ]; then
+            if ! [[ "$SUMMARY_DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+              echo "::error::date は YYYY-MM-DD の形で指定してください"
+              exit 1
+            fi
+            if [ "$(date -u -d "$SUMMARY_DATE" +%F 2>/dev/null)" != "$SUMMARY_DATE" ]; then
+              echo "::error::date に実在する日付を指定してください"
+              exit 1
+            fi
+          fi
+          node run.js ${SUMMARY_DATE:+--date=$SUMMARY_DATE}
 
       - name: Commit & push images
+        env:
+          SUMMARY_DATE: ${{ inputs.date }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add summary/
-          git diff --cached --quiet || git commit -m "chore(summary): update $(date -u +%Y-%m-%d)"
-          git push
+          if git diff --cached --quiet; then
+            echo "summary/ に変更なし（コミットしない）"
+            exit 0
+          fi
+          git commit -m "chore(summary): update ${SUMMARY_DATE:-$(date -u +%Y-%m-%d)}"
+          # push が GitHub 側の一時的なエラーで失敗したら、間をおいて最大 5 回やり直す
+          # （2026-11-04 に GitHub の障害で push が Internal Server Error になり、その日の画像が公開されなかった）
+          for attempt in 1 2 3 4 5; do
+            if git push; then
+              echo "push 成功（${attempt}回目）"
+              exit 0
+            fi
+            echo "::warning::push 失敗（${attempt}回目）"
+            if [ "$attempt" -lt 5 ]; then
+              sleep $((attempt * 30))
+              # リモートが先に進んでいた場合（前回の push が実は届いていた場合も含む）は取り込んでから再試行する。
+              # 取り込みで衝突したら自動では直せないので、ここで止める
+              if git fetch origin main; then
+                if ! git rebase FETCH_HEAD; then
+                  echo "::error::リモートの変更の取り込み（rebase）に失敗しました。自動再試行を中止します"
+                  git rebase --abort || true
+                  exit 1
+                fi
+              else
+                echo "::warning::fetch に失敗しました。次の push を試します"
+              fi
+            fi
+          done
+          # 5 回とも成功の応答が無かった。最後の push が実は届いていた可能性があるので到達を確かめる
+          if git fetch origin main && git merge-base --is-ancestor HEAD FETCH_HEAD; then
+            echo "コミットが origin/main に届いていることを確認しました"
+            exit 0
+          fi
+          echo "::error::push の成功応答がなく、コミットの到達も確認できません（画像は公開されていない見込み）"
+          exit 1
